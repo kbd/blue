@@ -52,7 +52,9 @@ documentation later.
         % prevday = day
     % end
     
-    <p>There were ${entries.length} entries, and you can print a dollar sign like ${'$'}</p>
+    <p>There were ${entries.length} entries, and you can print a dollar sign like ${'$'}.
+    Though of course a dollar sign won't be misinterpreted if it appears by itself $ or
+    as part of something that doesn't look like a variable reference (i.e. like money $3.50)</p>
     @end
     
     @def printEntry(entry)
