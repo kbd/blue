@@ -18,6 +18,8 @@ still needs a few small features, needs to be battle tested more, and I need to
 learn how to make it a gem. Other todos before release include Tilt support, a
 nice interface for Sinatra, and partials/includes.
 
+Also, I'm pretty new to Ruby so please feel free to offer style suggestions.
+
 Basic Usage
 -----------
 
@@ -47,7 +49,7 @@ documentation later.
         <h3><a href="$entry.url">$entry.title</a></h3>
         
         $printEntry(entry)
-        
+        % prevday = day
     % end
     
     <p>There were ${entries.length} entries, and you can print a dollar sign like ${'$'}</p>
