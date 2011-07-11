@@ -91,10 +91,12 @@ module Blue
                 'filter' => {:method => method(:parse_filter_command), :value => @default_filter},
                 'extends' => {:method => method(:parse_extends), :value => Blue::TemplateBase},
                 'include' => {:method => method(:parse_include), :value => nil},
-                'placeholders' => {:method => method(:parse_placeholders), :value => []}
             }
             
             #dollar regex
+            #I used an idea from http://blog.stevenlevithan.com/archives/match-quoted-string for quoted strings
+            #I didn't have this be strict on matching the opening quote with the same close quote because
+            #this is only an approximation of correct syntax anyway and it made the regex simpler
               ident = /[A-Za-z]\w*/
              idents = /#{ident}(?:\.#{ident})*/
              string = /["\'](?:\\?.)*?["\']/
@@ -111,10 +113,6 @@ module Blue
         end
     
         def parse_dollar(str)
-            #used an idea from http://blog.stevenlevithan.com/archives/match-quoted-string for quoted strings
-            #I didn't have this be strict on matching the opening quote with the same close quote because
-            #this is only an approximation of correct syntax anyway and it made the regex simpler
-            #               
             str.gsub(@dollar){ "${"+parse_filter($1,$2)+"}" }
         end
     
@@ -123,7 +121,7 @@ module Blue
                 sym, paren = exp.split(/\b(?=\()/)
                 [sym, paren ? ".call#{paren}" : '']
             }.reduce(str) { |v, f| "@filters.fetch(:#{f[0]})#{f[1]}.call(#{v})" }
-            #ruby's error messages are freaking awful here by default if a filter doesn't exist
+            #ruby's error messages are awful here by default if a filter doesn't exist
             #"IndexError: key not found" - doesn't even mention what key is missing
         end
         
@@ -225,16 +223,15 @@ module Blue
     
         def construct()
             @line_num = 0
-            @head = ''
             body = handle_body(handle_lines(@template))
             cls = <<END_OF_CODE
     class #{@name} < #{@blocks['extends'][:value]}
         def render(namespace={}, _filter=#{@default_filter.inspect})
 END_OF_CODE
         if @blocks['extends'][:value] != Blue::TemplateBase
-            cls << "#{@head}\nsuper\nend\n"
+            cls << "super\nend\n"
         else
-            cls << @head << <<'END_OF_CODE'
+            cls << <<'END_OF_CODE'
             @filter = @filters[_filter]
             @buffer = ''
             eval namespace.keys.map { |k| "#{k} = namespace[#{k.inspect}]" }.join("\n")
@@ -285,10 +282,6 @@ END_OF_CODE
         def parse_include(type, params, lines, text)
             raise "You must have specified a loader to use 'include'" if not @loader 
             text << ["@buffer = 'INCLUDE NYI'"]
-        end
-        
-        def parse_placeholders(type, params, lines, text)
-            @head << params.split.join('=') << " = ''\n"
         end
     end
 end
