@@ -69,19 +69,14 @@ module Blue
             @filters = {
                 :html => Proc.new{ |text| require 'cgi'; CGI::escapeHTML(text) },
                 :off => Proc.new { |x| x },
-                :caps => Proc.new{ |x| x.capitalize },
                 :datefmt => Proc.new{ |fmt| Proc.new{ |d| d.strftime(fmt) } }
             }
         end
     end
     
-    class Template
-        def classify_name(name)
-            name.split(/\W+/).map(&:capitalize).join('')
-        end
-        
+    class Template        
         def initialize(name, template, loader=nil, default_filter=:html)
-            @name = classify_name(name) + "Template" #name must be a valid Ruby class name
+            @name = name
             @template = template #template source
             @loader = loader
             @default_filter = default_filter
@@ -99,7 +94,7 @@ module Blue
             #this is only an approximation of correct syntax anyway and it made the regex simpler
               ident = /[A-Za-z]\w*/
              idents = /#{ident}(?:\.#{ident})*/
-             string = /["\'](?:\\?.)*?["\']/
+             string = /["'](?:\\?.)*?["']/
               value = /(?:#{string}|[\w.]+?)/
                brac = /(?:\((?:#{value},?)*\)|\[#{value}?\])/
                 var = /#{idents}#{brac}*/
@@ -200,7 +195,7 @@ module Blue
             out ||= Proc.new{ |item| "@buffer << #{item}" }
             body.map{ |item|
                 code_block?(item) ? item[0] : out.call(item)
-            }.join("\n") + "\n"
+            }.join("\n") + "\n@buffer\n"
         end
         
         def handle_block(body)
@@ -209,13 +204,13 @@ module Blue
 
         def create()
             begin
-                eval(construct())
+                klass = construct()
             rescue Exception => e
                 raise "Error compiling template #{@name}:\n\n#{e}\n\n"
             end
             
             begin
-                return eval(@name).new
+                return klass.new
             rescue Exception => e
                 raise "Error instantiating template #{@name}:\n\nError is: #{e}\n\n"
             end
@@ -223,38 +218,34 @@ module Blue
     
         def construct()
             @line_num = 0
-            body = handle_body(handle_lines(@template))
-            cls = <<END_OF_CODE
-    class #{@name} < #{@blocks['extends'][:value]}
-        def render(namespace={}, _filter=#{@default_filter.inspect})
-END_OF_CODE
-        if @blocks['extends'][:value] != Blue::TemplateBase
-            cls << "super\nend\n"
-        else
-            cls << <<'END_OF_CODE'
-            @filter = @filters[_filter]
-            @buffer = ''
-            eval namespace.keys.map { |k| "#{k} = namespace[#{k.inspect}]" }.join("\n")
-END_OF_CODE
-            #have to eval the code in a heredoc instead of just executing the code directly
-            # because you can't otherwise access the namespace variables created through an eval
-            # http://keithdevens.com/weblog/archive/2011/May/23/eval.locals
-            cls << <<END_OF_CODE
-            eval <<'THIS_STRING_BETTER_NOT_APPEAR_IN_THE_TEMPLATE'
-#{body}
-THIS_STRING_BETTER_NOT_APPEAR_IN_THE_TEMPLATE
-        end
-END_OF_CODE
-        end
-            #output all class blocks
-            @blocks.each{ |type, params|
-                next if not code_block?(params[:value]) or params[:value].empty? or not params[:process]
-                params[:value].each{ |item|
-                    cls << params[:process].call(item)
-                }
-            }
+            _body = handle_body(handle_lines(@template))
             
-            cls << "end\n"
+            #instance variables aren't available within Class.new since that class
+            #has its own new set of instance variables. So, save everything you need
+            #to locals so they're available within the define_method
+            _extends = @blocks['extends'][:value]
+            _filter = @default_filter
+            _blocks = @blocks
+            _code_block = method(:code_block?)
+            Class.new(@blocks['extends'][:value]) do
+                def render(namespace={}); render_args(namespace) end #need optional block params in 1.9
+                define_method(:render_args) do |namespace|
+                    return super if _extends != Blue::TemplateBase
+                    @filter = @filters[_filter]
+                    @buffer = ''
+                    eval namespace.keys.map { |k| "#{k} = namespace[#{k.inspect}]" }.join("\n")
+                    eval _body
+                end
+                #output all class blocks
+                code = ''
+                _blocks.each{ |type, params|
+                    next if not _code_block.call(params[:value]) or params[:value].empty? or not params[:process]
+                    params[:value].each{ |item|
+                        code << params[:process].call(item)
+                    }
+                }
+                eval code
+            end
         end
         
         def parse_def(type, params, lines, text)
