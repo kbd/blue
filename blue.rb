@@ -18,6 +18,8 @@
 #IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 #CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
+require 'cgi' #for HTML escaping
+
 module Blue
     class TemplateLoader
         def initialize(search_path=[], suffix='.blue')
@@ -26,48 +28,44 @@ module Blue
             @suffix = suffix
         end
         
-        def get(name, compiled=true)
+        def get(name) #load if not loaded, otherwise return existing
             return @loaded_templates[name] if @loaded_templates[name]
-            load_by_name(name, compiled)
+            load_by_name(name)
         end
         
-        def load_by_name(name, compiled=true)
+        def load_by_name(name) #load unconditionally
             @search_path.each{ |dir|
                 filename = File.join(dir, name.to_s + @suffix)
-                return load(filename, compiled) if File.exist?(filename)
+                return load(filename) if File.exist?(filename)
             }
             nil
         end
         
-        def instantiate(name, body, compiled=true)
-            template = Template.new(name, body, loader=self)
-            if compiled
-                @loaded_templates[name] = template.create
-            else
-                template.construct
-            end
-        end
-        
-        def load(filename, compiled=true) #load from file
+        def load(filename) #load from file
             name = File.basename(filename)
             i = name.index('.')
             name = name[0..i-1] if i > 0
-            instantiate(name, File.open(filename), compiled)
+            instantiate(name, File.open(filename))
         end
         
-        def loads(name, template, compiled=true) #load from string
+        def loads(name, template) #load from string
             if template.is_a? String
                 require 'stringio'
                 template = StringIO.new(template)
             end
-            instantiate(name, template, compiled)
+            instantiate(name, template)
+        end
+                
+        def instantiate(name, body)
+            template = Template.new(name, body, loader=self)
+            @loaded_templates[name] = template.create
         end
     end
 
     class TemplateBase #base class for all generated templates
         def initialize()
             @filters = {
-                :html => Proc.new{ |text| require 'cgi'; CGI::escapeHTML(text) },
+                :html => Proc.new{ |text| CGI::escapeHTML(text) },
                 :off => Proc.new { |x| x },
                 :datefmt => Proc.new{ |fmt| Proc.new{ |d| d.strftime(fmt) } }
             }
@@ -192,14 +190,14 @@ module Blue
         end
         
         def handle_body(body, &out)
-            out ||= Proc.new{ |item| "@buffer << #{item}" }
+            out ||= Proc.new{ |item| "@b << #{item}" }
             body.map{ |item|
                 code_block?(item) ? item[0] : out.call(item)
-            }.join("\n") + "\n@buffer\n"
+            }.join("\n") + "\n@b\n"
         end
         
         def handle_block(body)
-            handle_body(body){ |item| "_buffer << #{item.inspect}" }
+            handle_body(body){ |item| "_b << #{item.inspect}" }
         end
 
         def create()
@@ -227,12 +225,12 @@ module Blue
             _filter = @default_filter
             _blocks = @blocks
             _code_block = method(:code_block?)
-            Class.new(@blocks['extends'][:value]) do
+            Class.new(_extends) do
                 def render(namespace={}); render_args(namespace) end #need optional block params in 1.9
                 define_method(:render_args) do |namespace|
                     return super if _extends != Blue::TemplateBase
                     @filter = @filters[_filter]
-                    @buffer = ''
+                    @b = ''
                     eval namespace.keys.map { |k| "#{k} = namespace[#{k.inspect}]" }.join("\n")
                     eval _body
                 end
@@ -245,6 +243,12 @@ module Blue
                     }
                 }
                 eval code
+                def uncompiled_body
+                    _body
+                end
+                def uncompiled_blocks
+                    code
+                end
             end
         end
         
@@ -254,7 +258,7 @@ module Blue
 
         def parse_block(type, params, lines, text)
             text << ["#{params} binding"] unless @blocks['extends'][:value].instance_methods.index params #only output block on the first time it's defined
-            @blocks[type][:value] << ([["def #{params}(b)\n_buffer=''"], *handle_body(handle_lines(lines))] << ["eval(_buffer, b)\nend"])
+            @blocks[type][:value] << ([["def #{params}(b)\n_b=''"], *handle_body(handle_lines(lines))] << ["eval(_b, b)\nend"])
         end
         
         def parse_filter_command(type, filter_name, lines, text)
@@ -272,7 +276,7 @@ module Blue
         
         def parse_include(type, params, lines, text)
             raise "You must have specified a loader to use 'include'" if not @loader 
-            text << ["@buffer = 'INCLUDE NYI'"]
+            text << ["@b = 'INCLUDE NYI'"]
         end
     end
 end
