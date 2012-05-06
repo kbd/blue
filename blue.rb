@@ -24,7 +24,7 @@ module Blue
     class TemplateLoader
         def initialize(search_path=[], suffix='.blue')
             @loaded_templates = {}
-            @search_path = search_path
+            @search_path = Array(search_path)
             @suffix = suffix
         end
         
@@ -93,7 +93,7 @@ module Blue
               ident = /[A-Za-z]\w*/
              idents = /#{ident}(?:\.#{ident})*/
              string = /["'](?:\\?.)*?["']/
-              value = /(?:#{string}|[\w.]+?)/
+              value = /(?:#{string}|[\w:.]+?)/
                brac = /(?:\((?:#{value},?)*\)|\[#{value}?\])/
                 var = /#{idents}#{brac}*/
               @expr = /#{var}(?:\.#{var})*/
@@ -154,7 +154,7 @@ module Blue
             
             raise 'PARSE ERROR' if not index
     
-            (result << [[str[startindex+2..index-1]]]).concat(parse_braces(str[index+1..-1]))
+            (result << [str[startindex+2..index-1]]).concat(parse_braces(str[index+1..-1]))
         end
         
         def handle_lines(lines)
@@ -178,7 +178,7 @@ module Blue
                     
                     begin
                         text.concat(parse_inline(line).map{ |item|
-                            code_block?(item) ? "@filter.call((#{item[0]}).to_s)" : item.inspect
+                            code_block?(item) ? "@f.call((#{item[0]}).to_s)" : item.inspect
                         })
                     rescue => e
                         raise "Error parsing at template line #{@line_num}: '#{line}' - #{e}"
@@ -193,7 +193,7 @@ module Blue
             out ||= Proc.new{ |item| "@b << #{item}" }
             body.map{ |item|
                 code_block?(item) ? item[0] : out.call(item)
-            }.join("\n") + "\n@b\n"
+            }.join("\n") + "\n@b\n" #return @b at end
         end
         
         def handle_block(body)
@@ -204,50 +204,46 @@ module Blue
             begin
                 klass = construct()
             rescue Exception => e
-                raise "Error compiling template #{@name}:\n\n#{e}\n\n"
+                raise "Error compiling template '#{@name}':\n\n#{e}\n\n"
             end
             
             begin
                 return klass.new
             rescue Exception => e
-                raise "Error instantiating template #{@name}:\n\nError is: #{e}\n\n"
+                raise "Error instantiating template '#{@name}':\n\nError is: #{e}\n\n"
             end
         end
     
         def construct()
-            @line_num = 0
-            _body = handle_body(handle_lines(@template))
-            
             #instance variables aren't available within Class.new since that class
             #has its own new set of instance variables. So, save everything you need
             #to locals so they're available within the define_method
+            @line_num = 0
+            _body = handle_body(handle_lines(@template))
             _extends = @blocks['extends'][:value]
             _filter = @default_filter
-            _blocks = @blocks
-            _code_block = method(:code_block?)
+
+            #class blocks
+            _code = @blocks.values.select{ |params|
+                code_block?(params[:value]) and not params[:value].empty? and params[:process]
+            }.map { |params|
+                params[:value].map{ |item| params[:process].call(item) }
+            }.join("\n")
+
             Class.new(_extends) do
-                def render(namespace={}); render_args(namespace) end #need optional block params in 1.9
-                define_method(:render_args) do |namespace|
-                    return super if _extends != Blue::TemplateBase
-                    @filter = @filters[_filter]
-                    @b = ''
-                    eval namespace.keys.map { |k| "#{k} = namespace[#{k.inspect}]" }.join("\n")
-                    eval _body
+                define_method(:render) do |*args|
+                    namespace = args[0] || {}
+                    return super(namespace) if _extends != Blue::TemplateBase
+                    @b = ''                #buffer
+                    @f = @filters[_filter] #filter
+                    _binding = binding
+                    _binding.eval namespace.keys.map { |k| "#{k} = namespace[#{k.inspect}]" }.join("\n")
+                    _binding.eval _body
                 end
-                #output all class blocks
-                code = ''
-                _blocks.each{ |type, params|
-                    next if not _code_block.call(params[:value]) or params[:value].empty? or not params[:process]
-                    params[:value].each{ |item|
-                        code << params[:process].call(item)
-                    }
-                }
-                eval code
-                def uncompiled_body
-                    _body
-                end
-                def uncompiled_blocks
-                    code
+                eval _code
+
+                define_method(:_source) do
+                    "def render()\n#{_body}\nend\n\n#{_code}"
                 end
             end
         end
@@ -265,7 +261,7 @@ module Blue
             #params is the name of the filter you want to make default,
             # the string "off" to disable the default filter
             # or simply blank to re-enable the default filter
-            text << ["@filter = @filters[:#{filter_name ? filter_name: @blocks[type][:value]}]"]
+            text << ["@f = @filters[:#{filter_name ? filter_name: @blocks[type][:value]}]"]
         end
         
         def parse_extends(type, params, lines, text)
