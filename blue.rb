@@ -1,23 +1,3 @@
-#Copyright (c) 2011, Keith Devens - http://keithdevens.com/
-#Source code available at http://github.com/kbd/blue
-#
-#Permission is hereby granted, free of charge, to any person obtaining a copy of
-#this software and associated documentation files (the "Software"), to deal in
-#the Software without restriction, including without limitation the rights to
-#use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
-#the Software, and to permit persons to whom the Software is furnished to do so,
-#subject to the following conditions:
-#
-#The above copyright notice and this permission notice shall be included in all
-#copies or substantial portions of the Software.
-#
-#THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-#IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-#FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-#COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-#IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
-#CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-
 require 'cgi' #for HTML escaping
 
 module Blue
@@ -253,8 +233,11 @@ module Blue
     end
 
     def parse_block(type, params, lines, text)
-      text << ["#{params} binding"] unless @blocks['extends'][:value].instance_methods.index params #only output block on the first time it's defined
-      @blocks[type][:value] << ([["def #{params}(b)\n_b=''"], *handle_body(handle_lines(lines))] << ["eval(_b, b)\nend"])
+      #only output block on the first time it's defined
+      text << ["#{params} binding"] unless @blocks['extends'][:value].instance_methods.index params
+      @blocks[type][:value] << (
+        [["def #{params}(b)\n_b=''"], *handle_body(handle_lines(lines))] << ["eval(_b, b)\nend"]
+      )
     end
     
     def parse_filter_command(type, filter_name, lines, text)
