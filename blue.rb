@@ -1,4 +1,25 @@
 require 'cgi' #for HTML escaping
+require 'tilt/template'
+
+module Tilt
+  class BlueTemplate < Template
+    #this is totally not finished, I'm not sure exactly
+    #what I have to override to work with Tilt
+    self.default_mime_type = 'text/html'
+
+    def prepare
+      @template = Blue::Template.new(file, data, loader=self).create
+    end
+
+    def evaluate(scope, locals, &block)
+
+    end
+
+    def precompiled_template(locals)
+      @data
+    end
+  end
+end
 
 module Blue
   class TemplateLoader
@@ -45,11 +66,18 @@ module Blue
   class TemplateBase #base class for all generated templates
     def initialize()
       @filters = {
-        :html => Proc.new{ |text| CGI::escapeHTML(text) },
+        :html => Proc.new { |text| CGI::escapeHTML(text) },
         :off => Proc.new { |x| x },
-        :datefmt => Proc.new{ |fmt| Proc.new{ |d| d.strftime(fmt) } }
+        :datefmt => Proc.new { |fmt| Proc.new { |d| d.strftime(fmt) } }
       }
+      @filters.default_proc = proc do |hash, key|
+        raise( "@filter: '#{key}' is not a valid filter name" )
+      end
     end
+
+    # def method_missing(method_name, *args, &block)
+    #   return "SUBSTITUTED VALUE IS #{method_name}"
+    # end
   end
   
   class Template        
@@ -63,7 +91,8 @@ module Blue
         'block' => {:method => method(:parse_block), :value => [], :process => method(:handle_block)},
         'filter' => {:method => method(:parse_filter_command), :value => @default_filter},
         'extends' => {:method => method(:parse_extends), :value => Blue::TemplateBase},
-        'include' => {:method => method(:parse_include), :value => nil},
+        'include' => {:method => method(:parse_include)},
+        'default' => {:method => method(:parse_default)},
       }
       
       #dollar regex
@@ -75,7 +104,7 @@ module Blue
        string = /["'](?:\\?.)*?["']/
         value = /(?:#{string}|[\w:.]+?)/
          brac = /(?:\((?:#{value},?)*\)|\[#{value}?\])/
-        var = /#{idents}#{brac}*/
+          var = /#{idents}#{brac}*/
         @expr = /#{var}(?:\.#{var})*/
        filter = /(?:\|#{@expr})*/
       @dollar = /\$(#{@expr})(#{filter})/
@@ -146,10 +175,12 @@ module Blue
         if line.lstrip.start_with? '%'
           output = false
           text << [line.lstrip[1..-1]]
-        elsif line =~ /^\s*@(\S+)(?:\s+(.*?)\s*)?$/ #looks like "@foo params" (params optional)
+        elsif line =~ /^\s*@(\S+)\s*(.+?)?\s*$/ #looks like "@foo params" (params optional)
           return text if $1 == 'end'
           output = false
           raise "Invalid @ block, unknown key '#{$1}' on template line #{@line_num}: '#{line}'" if not @blocks.key? $1
+          #params to a block are the method name, the list of params,
+          #a reference to the current lines, and a text block the method is allowed to modify
           @blocks[$1][:method].call($1, $2, lines, text)
         else
           #if the last line was output, or if the current line is blank, put a newline on the end of it
@@ -215,7 +246,7 @@ module Blue
           namespace = args[0] || {}
           return super(namespace) if _extends != Blue::TemplateBase
           @b = ''                #buffer
-          @f = @filters[_filter] #filter
+          @f = @filters[:on] = @filters[:default] = @filters[_filter]
           _binding = binding
           _binding.eval namespace.keys.map { |k| "#{k} = namespace[#{k.inspect}]" }.join("\n")
           _binding.eval _body
@@ -244,7 +275,7 @@ module Blue
       #params is the name of the filter you want to make default,
       # the string "off" to disable the default filter
       # or simply blank to re-enable the default filter
-      text << ["@f = @filters[:#{filter_name ? filter_name: @blocks[type][:value]}]"]
+      text << ["@f = @filters[:#{filter_name ? filter_name : @blocks[type][:value]}]"]
     end
     
     def parse_extends(type, params, lines, text)
@@ -256,6 +287,19 @@ module Blue
     def parse_include(type, params, lines, text)
       raise "You must have specified a loader to use 'include'" if not @loader 
       text << ["@b = 'INCLUDE NYI'"]
+    end
+
+    def parse_default(type, params, lines, text)
+      #default looks like "default [], var[, var2, var3...]"
+      #and results in assignments like var ||= []; var2 ||= [], etc.
+      #this is naive and will fail if there's a comma character in your default
+      #this is really only meant for setting a default "empty" value for
+      #a variable used in your template if the caller doesn't provide it
+      params = params.split(',').map{|s| s.strip}
+      default = params.shift
+      params.each{ |p|
+        text << ["#{p} ||= #{default}"]
+      }
     end
   end
 end
