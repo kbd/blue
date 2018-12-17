@@ -281,4 +281,38 @@ module Blue
       }
     end
   end
+
+  def self.template(*args)
+    Blue::Template.new(*args).create
+  end
+
+  def self.render_template(template, data)
+    # template is either a path or a template string directly
+    # - treat it as a path if it's a one-line string
+    # data is either the path to the data file (a string) or a hash to use directly
+    if template.include? "\n" # template was passed as a string
+      path = '<string>'
+    else # template is the path to the template file
+      path = File.expand_path template
+      raise "Path '#{path}' not found" if !File.exist? path
+      template = File.open(path)
+    end
+
+    template = self.template(path, template)
+
+    if data.is_a? String
+      data = File.expand_path data
+      raise "Path '#{data}' not found" if !File.exist? data
+      ext = File.extname(data)
+      if ext == '.json'
+        require 'json'
+        data = JSON.load(File.open(data))
+      elsif ext == '.yml' or ext == '.yaml'
+        require 'yaml'
+        data = YAML.load(File.open(data))
+      end
+    end
+
+    template.render(data)
+  end
 end
