@@ -1,3 +1,4 @@
+#!/usr/bin/env ruby
 require 'cgi' # for HTML escaping
 
 module Blue
@@ -314,5 +315,26 @@ module Blue
     end
 
     template.render(data)
+  end
+end
+
+if __FILE__ == $0
+  # usage: blue template_path { data_path | arg=uments }
+  template_path = ARGV.shift
+  abort("Template path not provided") if not template_path
+  abort("Template '#{template_path}' not found") if !File.file?(template_path)
+  abort("Data not provided for template") if ARGV.length == 0
+  data_path = ARGV[0]
+  if File.file?(data_path)
+    abort("Too many arguments") if ARGV.length > 1
+    args = data_path
+  else
+    # modified from https://stackoverflow.com/a/26435303
+    args = Hash[ ARGV.flat_map{|s| s.scan(/([^=\s]+)(?:=(\S+))?/)} ]
+  end
+  begin
+    puts Blue::render_template(template_path, args)
+  rescue NameError => e
+    abort("Undefined template variable '#{e.name}'")
   end
 end
